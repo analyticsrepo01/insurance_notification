@@ -14,12 +14,16 @@
 
 import os
 import smtplib
+import subprocess
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Any, Dict
 from dotenv import load_dotenv
 from google.adk import Agent
+from google.adk.tools.long_running_tool import LongRunningFunctionTool
+from google.adk.tools.tool_context import ToolContext
 from google.genai import types
+from .approval_manager import approval_manager
 
 # Load environment variables
 load_dotenv()
@@ -218,6 +222,194 @@ def check_policy_status(policy_number: str) -> Dict[str, Any]:
         }
 
 
+def request_claim_approval(
+    claim_id: str,
+    customer_email: str,
+    user_id: str = "customer001",
+    session_id: str = "default_session",
+    tool_context: ToolContext = None
+) -> Dict[str, Any]:
+    """
+    Request approval for a claim submission. This is a long-running tool that sends
+    an email with approve/reject buttons and waits for user response.
+
+    Args:
+        claim_id: The claim ID requiring approval
+        customer_email: Email address to send approval request to
+        user_id: User ID for the ADK session (default: customer001)
+        session_id: Session ID for the ADK session (default: default_session)
+        tool_context: ADK tool context for long-running operations
+
+    Returns:
+        Dictionary with status and ticket information
+    """
+    # Get claim details
+    claim_result = get_claim_status(claim_id)
+
+    if claim_result.get("status") == "not_found":
+        return {
+            "status": "error",
+            "message": f"Claim {claim_id} not found"
+        }
+
+    claim = claim_result.get("claim", {})
+
+    # Extract session info from tool_context to enable resuming the agent
+    import sys
+    if tool_context:
+        print(f"🔍 tool_context type: {type(tool_context)}", file=sys.stderr)
+        print(f"🔍 tool_context attributes: {dir(tool_context)}", file=sys.stderr)
+
+        # Get function_call_id
+        function_call_id = getattr(tool_context, 'function_call_id', None)
+
+        # Try to extract user_id and session_id from _invocation_context
+        actual_user_id = None
+        actual_session_id = None
+
+        invocation_context = getattr(tool_context, '_invocation_context', None)
+        if invocation_context:
+            print(f"🔍 _invocation_context type: {type(invocation_context)}", file=sys.stderr)
+            print(f"🔍 _invocation_context attributes: {dir(invocation_context)}", file=sys.stderr)
+
+            actual_user_id = getattr(invocation_context, 'user_id', None)
+            actual_session_id = getattr(invocation_context, 'session_id', None)
+
+            # Try to get session_id from the session object
+            session = getattr(invocation_context, 'session', None)
+            if session:
+                print(f"🔍 session type: {type(session)}", file=sys.stderr)
+                print(f"🔍 session attributes: {dir(session)}", file=sys.stderr)
+
+                # Try different possible attributes
+                if hasattr(session, 'session_id'):
+                    actual_session_id = session.session_id
+                elif hasattr(session, 'id'):
+                    actual_session_id = session.id
+                elif hasattr(session, 'uuid'):
+                    actual_session_id = session.uuid
+
+                print(f"🔍 Extracted session_id from session object: {actual_session_id}", file=sys.stderr)
+
+            print(f"🔍 Extracted from _invocation_context: user_id={actual_user_id}, session_id={actual_session_id}", file=sys.stderr)
+
+        # If we couldn't extract from context, fall back to parameters
+        if not actual_user_id:
+            actual_user_id = user_id
+        if not actual_session_id:
+            actual_session_id = session_id
+    else:
+        actual_user_id = user_id
+        actual_session_id = session_id
+        function_call_id = None
+
+    session_info = {
+        "app_name": "insurance_notification",
+        "user_id": actual_user_id,
+        "session_id": actual_session_id,
+        "function_call_id": function_call_id
+    }
+
+    print(f"🔍 Final session info: user_id={actual_user_id}, session_id={actual_session_id}, function_call_id={function_call_id}", file=sys.stderr)
+
+    # Create approval request
+    approval_request = approval_manager.create_approval_request(
+        claim_id=claim_id,
+        user_email=customer_email,
+        request_type="claim_verification",
+        metadata={
+            "claim": claim,
+            "session_info": session_info
+        },
+        function_call_id=session_info["function_call_id"]
+    )
+
+    ticket_id = approval_request.ticket_id
+
+    # Get approval API server URL (separate from ADK web server)
+    approval_api_url = os.getenv("APPROVAL_API_URL")
+
+    if not approval_api_url:
+        # Dynamically get external IP
+        try:
+            external_ip = subprocess.check_output(
+                ["curl", "-s", "ifconfig.me"],
+                timeout=5
+            ).decode('utf-8').strip()
+            approval_port = os.getenv("APPROVAL_API_PORT", "8085")
+            approval_api_url = f"http://{external_ip}:{approval_port}"
+        except Exception:
+            # Fallback to localhost if external IP detection fails
+            approval_api_url = "http://localhost:8085"
+
+    # Generate approve/reject URLs
+    approve_url = f"{approval_api_url}/api/approve/{ticket_id}"
+    reject_url = f"{approval_api_url}/api/reject/{ticket_id}"
+
+    # Send email with approval buttons
+    email_subject = f"Action Required: Verify Claim Submission - {claim_id}"
+    email_body = f"""
+    <h3>Claim Verification Required</h3>
+
+    <p>We received a request related to claim <strong>{claim_id}</strong>.</p>
+
+    <p><strong>Claim Details:</strong></p>
+    <ul>
+        <li>Claim ID: {claim.get('claim_id', 'N/A')}</li>
+        <li>Type: {claim.get('claim_type', 'N/A').replace('_', ' ').title()}</li>
+        <li>Amount: ${claim.get('claim_amount', 0):,.2f}</li>
+        <li>Status: {claim.get('status', 'N/A').replace('_', ' ').title()}</li>
+        <li>Filed Date: {claim.get('filed_date', 'N/A')}</li>
+    </ul>
+
+    <p><strong>Please confirm:</strong> Did you submit this claim via mail?</p>
+
+    <div style="margin: 30px 0; text-align: center;">
+        <a href="{approve_url}"
+           style="background-color: #28a745; color: white; padding: 12px 30px; text-decoration: none;
+                  border-radius: 5px; margin: 10px; display: inline-block; font-weight: bold;">
+            ✓ YES, I SUBMITTED THIS CLAIM
+        </a>
+
+        <a href="{reject_url}"
+           style="background-color: #dc3545; color: white; padding: 12px 30px; text-decoration: none;
+                  border-radius: 5px; margin: 10px; display: inline-block; font-weight: bold;">
+            ✗ NO, I DID NOT SUBMIT THIS
+        </a>
+    </div>
+
+    <p style="margin-top: 30px; color: #666; font-size: 12px;">
+        <strong>Ticket ID:</strong> {ticket_id}<br>
+        Click one of the buttons above to confirm. This is a one-time action and cannot be undone.
+    </p>
+    """
+
+    # Send the approval email
+    email_result = send_email_notification(
+        recipient_email=customer_email,
+        subject=email_subject,
+        message=email_body,
+        notification_type="claim_verification"
+    )
+
+    if email_result.get("status") != "success":
+        return {
+            "status": "error",
+            "message": "Failed to send approval email",
+            "error": email_result.get("message")
+        }
+
+    # Return pending status - the agent will wait for approval
+    return {
+        "status": "pending",
+        "ticket_id": ticket_id,
+        "claim_id": claim_id,
+        "message": f"Approval request sent to {customer_email}. Awaiting response.",
+        "approve_url": approve_url,
+        "reject_url": reject_url
+    }
+
+
 # Insurance Customer Service Agent
 root_agent = Agent(
     model='gemini-2.5-flash',
@@ -229,6 +421,7 @@ root_agent = Agent(
     1. **Claim Status Updates**: Check claim status and notify customers via email
     2. **Policy Information**: Provide policy details and renewal reminders
     3. **Email Notifications**: Send formatted email notifications to customers
+    4. **Claim Verification**: Request customer approval for claim submissions via email with approve/reject buttons
 
     **Important Guidelines:**
     - Always be professional and empathetic when dealing with insurance matters
@@ -241,20 +434,35 @@ root_agent = Agent(
     - claim_update: For claim status changes
     - policy_renewal: For policy renewal reminders
     - payment_reminder: For payment due notices
+    - claim_verification: For approval requests
     - general: For general insurance communications
 
-    **Workflow:**
+    **Approval Workflow (Human-in-the-Loop):**
+    - Use request_claim_approval when you need to verify that a customer submitted a claim
+    - This is a long-running tool that sends an email with approve/reject buttons
+    - IMPORTANT: When calling request_claim_approval, you must provide:
+      - claim_id: The claim ID to verify
+      - customer_email: The email to send the approval request to
+      - user_id: "customer001" (or the appropriate user ID)
+      - session_id: "test_session_001" (or the appropriate session ID)
+    - The agent will pause and wait for the customer to click approve or reject
+    - Once the customer responds, the agent will resume and can proceed with next steps
+    - After approval, send a final confirmation email using send_email_notification
+
+    **Standard Workflow:**
     1. When asked about a claim, first use get_claim_status to retrieve details
-    2. Then send an email notification with the claim information
-    3. For policy inquiries, use check_policy_status first
-    4. Always confirm after sending an email notification
+    2. If verification is needed, use request_claim_approval to get customer confirmation
+    3. Otherwise, send an email notification with the claim information
+    4. For policy inquiries, use check_policy_status first
+    5. Always confirm after sending an email notification
 
     Be proactive in sending notifications when you detect important updates or upcoming deadlines.
     """,
     tools=[
         send_email_notification,
         get_claim_status,
-        check_policy_status
+        check_policy_status,
+        LongRunningFunctionTool(func=request_claim_approval)
     ],
     generate_content_config=types.GenerateContentConfig(
         temperature=0.2,  # Lower temperature for consistent, professional responses

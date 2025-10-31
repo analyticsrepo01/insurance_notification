@@ -26,8 +26,10 @@ An AI-powered insurance customer service agent built with Google's Agent Develop
 insurance_notification/
 ├── __init__.py              # Package initialization
 ├── agent.py                 # Agent configuration and setup with HITL tools
+├── server.py                # FastAPI server wrapper for production deployment
 ├── approval_api.py          # FastAPI server for handling approval callbacks
 ├── approval_manager.py      # Manages approval state and lifecycle
+├── start_agent_server.sh    # Script to start the agent FastAPI server
 ├── start_approval_api.sh    # Script to start the approval API server
 ├── design.md                # Architecture and design documentation
 ├── README.md                # This file
@@ -66,12 +68,21 @@ SMTP_PORT=587
 # Approval API Configuration
 APPROVAL_API_PORT=8085
 APPROVAL_API_URL=http://your-external-ip:8085  # Optional - auto-detected if not set
-ADK_API_URL=http://127.0.0.1:8084  # ADK web server URL for agent resumption
+
+# Agent Server Configuration
+AGENT_SERVER_PORT=8080  # Port for the FastAPI agent server
+ADK_API_URL=http://127.0.0.1:8080  # Agent server URL for approval resumption (use 8080 for FastAPI, 8084 for ADK web)
+
+# Session Service (Optional - for production)
+SESSION_SERVICE_URI=  # Leave empty for in-memory sessions (development)
+                      # For production, use: redis://localhost:6379 or firestore://your-project
 ```
 
 **Note:**
 - If you leave `SENDER_PASSWORD` empty, the agent will run in **demo mode** and print email notifications to the console instead of sending real emails.
 - `APPROVAL_API_URL` is auto-detected using your external IP if not set. Set it manually if you need a specific URL.
+- `ADK_API_URL`: Set to `http://127.0.0.1:8080` when using FastAPI server, or `http://127.0.0.1:8084` when using ADK web server.
+- `SESSION_SERVICE_URI`: Leave empty for development (in-memory sessions). For production, configure a persistent session service.
 
 ### 3. Set Up Gmail App Password (Optional)
 
@@ -103,6 +114,8 @@ The approval API server handles approval/rejection callbacks from email links.
 # From the project root directory (hitl-adk)
 cd insurance_notification
 bash start_approval_api.sh
+
+bash insurance_notification/start_approval_api.sh
 ```
 
 Or run directly:
@@ -149,14 +162,70 @@ The ADK web server will start on port **8084** by default.
 +-----------------------------------------------------------------------------+
 ```
 
+#### 2. (Alternative) Start the FastAPI Agent Server (Terminal 2)
+
+**For production deployments**, use the FastAPI server instead of the ADK web server. The FastAPI server provides the same functionality but with more control and production-ready features.
+
+```bash
+# From the project root directory (hitl-adk)
+bash insurance_notification/start_agent_server.sh
+```
+
+Or run directly:
+```bash
+# From the project root directory (hitl-adk)
+python -m insurance_notification.server
+```
+
+The FastAPI server will start on port **8080** by default.
+
+**Expected Output:**
+```
+======================================================================
+🚀 Starting Insurance Notification Agent - FastAPI Server
+======================================================================
+
+Server running at: http://0.0.0.0:8080
+
+Endpoints:
+  - POST /run                       - Run the agent
+  - GET  /apps                      - List available apps
+  - GET  /health                    - Health check
+  - POST /feedback                  - Submit feedback
+  - GET  /api/approvals/pending     - Get pending approvals
+
+Note: Make sure the Approval API is running on port 8085
+======================================================================
+```
+
+**FastAPI Server Features:**
+- ✅ Production-ready deployment
+- ✅ Cloud logging and tracing
+- ✅ Custom endpoints for feedback and approval management
+- ✅ Health check endpoint
+- ✅ Session service configuration (Redis, Firestore)
+- ✅ Same API routes as ADK web server
+
+**Important:** When using the FastAPI server, update your `.env` file:
+```bash
+ADK_API_URL=http://127.0.0.1:8080  # Use port 8080 instead of 8084
+```
+
 #### 3. Access the Web Interface
 
+**For ADK Web Server** (port 8084):
 Open your browser and navigate to:
 ```
 http://localhost:8084
 ```
 
 Select the `insurance_notification` agent from the list.
+
+**For FastAPI Server** (port 8080):
+The FastAPI server provides REST API endpoints. You can:
+- Use the interactive API docs at `http://localhost:8080/docs`
+- Send requests to `/run` endpoint programmatically
+- Access the web UI at `http://localhost:8080/dev-ui/`
 
 ### Example Interactions
 

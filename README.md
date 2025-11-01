@@ -65,13 +65,13 @@ SENDER_PASSWORD=your-app-specific-password
 SMTP_SERVER=smtp.gmail.com
 SMTP_PORT=587
 
-# Approval API Configuration
-APPROVAL_API_PORT=8085
-APPROVAL_API_URL=http://your-external-ip:8085  # Optional - auto-detected if not set
+# All-in-One Server Configuration
+AGENT_SERVER_PORT=8086  # Port for the unified FastAPI server (agent + approvals)
+ADK_API_URL=http://127.0.0.1:8086  # Server URL for agent resumption (use 8086 for FastAPI, 8084 for adk web)
 
-# Agent Server Configuration
-AGENT_SERVER_PORT=8080  # Port for the FastAPI agent server
-ADK_API_URL=http://127.0.0.1:8080  # Agent server URL for approval resumption (use 8080 for FastAPI, 8084 for ADK web)
+# Approval URL Configuration (Optional)
+APPROVAL_API_URL=http://your-external-ip:8086  # Optional - auto-detected if not set
+                                                # Used for email approve/reject button URLs
 
 # Session Service (Optional - for production)
 SESSION_SERVICE_URI=  # Leave empty for in-memory sessions (development)
@@ -80,8 +80,9 @@ SESSION_SERVICE_URI=  # Leave empty for in-memory sessions (development)
 
 **Note:**
 - If you leave `SENDER_PASSWORD` empty, the agent will run in **demo mode** and print email notifications to the console instead of sending real emails.
-- `APPROVAL_API_URL` is auto-detected using your external IP if not set. Set it manually if you need a specific URL.
-- `ADK_API_URL`: Set to `http://127.0.0.1:8080` when using FastAPI server, or `http://127.0.0.1:8084` when using ADK web server.
+- `APPROVAL_API_URL` is auto-detected using your external IP if not set. Set it manually if you need a specific URL for email links.
+- `ADK_API_URL`: Set to `http://127.0.0.1:8086` when using FastAPI server (recommended), or `http://127.0.0.1:8084` when using `adk web` for development.
+- `AGENT_SERVER_PORT`: Everything runs on port **8086** now (agent + approvals in one server).
 - `SESSION_SERVICE_URI`: Leave empty for development (in-memory sessions). For production, configure a persistent session service.
 
 ### 3. Set Up Gmail App Password (Optional)
@@ -102,69 +103,16 @@ gcloud config set project YOUR_PROJECT_ID
 
 ## Usage
 
-### Starting the Services
+### Starting the Server
 
-This application requires two services to be running:
+**This application now runs as a single unified server!** No need to run multiple terminals or services.
 
-#### 1. Start the Approval API Server (Terminal 1)
+The FastAPI server includes:
+- ✅ Agent endpoints (run agent, web UI, API docs)
+- ✅ Approval endpoints (approve/reject callbacks)
+- ✅ Utility endpoints (health check, feedback)
 
-The approval API server handles approval/rejection callbacks from email links.
-
-```bash
-# From the project root directory (hitl-adk)
-cd insurance_notification
-bash start_approval_api.sh
-
-bash insurance_notification/start_approval_api.sh
-```
-
-Or run directly:
-```bash
-# From the project root directory (hitl-adk)
-python -m insurance_notification.approval_api
-```
-
-The approval API will start on port **8085** by default.
-
-**Expected Output:**
-```
-======================================================================
-🚀 Starting Insurance Notification Approval API
-======================================================================
-
-Server running at: http://0.0.0.0:8085
-
-Endpoints:
-  - GET  /api/approve/{ticket_id}  - Approve a request
-  - GET  /api/reject/{ticket_id}   - Reject a request
-  - GET  /api/status/{ticket_id}   - Get request status
-  - GET  /api/pending               - List pending requests
-======================================================================
-```
-
-#### 2. Start the ADK Web Server (Terminal 2)
-
-The ADK web server runs the agent and provides the web interface.
-
-```bash
-# From the project root directory (hitl-adk)
-adk web .
-```
-
-The ADK web server will start on port **8084** by default.
-
-**Expected Output:**
-```
-+-----------------------------------------------------------------------------+
-| ADK Web Server started                                                      |
-|                                                                             |
-| For local testing, access at http://0.0.0.0:8084.                         |
-+-----------------------------------------------------------------------------+
-```
-
-#### 2. (Alternative) Start the FastAPI Agent Server (Terminal 2)
-
-**For production deployments**, use the FastAPI server instead of the ADK web server. The FastAPI server provides the same functionality but with more control and production-ready features.
+#### Start the All-in-One FastAPI Server
 
 ```bash
 # From the project root directory (hitl-adk)
@@ -177,55 +125,72 @@ Or run directly:
 python -m insurance_notification.server
 ```
 
-The FastAPI server will start on port **8080** by default.
+The server will start on port **8086** by default.
 
 **Expected Output:**
 ```
-======================================================================
-🚀 Starting Insurance Notification Agent - FastAPI Server
-======================================================================
+================================================================================
+🚀 Insurance Notification Agent - All-in-One FastAPI Server
+================================================================================
 
-Server running at: http://0.0.0.0:8080
+Server running at: http://0.0.0.0:8086
 
-Endpoints:
+📋 AGENT ENDPOINTS:
   - POST /run                       - Run the agent
   - GET  /apps                      - List available apps
+  - GET  /dev-ui/                   - Web interface
+  - GET  /docs                      - Interactive API docs
+
+✅ APPROVAL ENDPOINTS (Human-in-the-Loop):
+  - GET  /api/approve/{ticket_id}   - Approve a request
+  - GET  /api/reject/{ticket_id}    - Reject a request
+  - GET  /api/status/{ticket_id}    - Get request status
+  - GET  /api/approvals/pending     - List pending approvals
+
+🔧 UTILITY ENDPOINTS:
   - GET  /health                    - Health check
   - POST /feedback                  - Submit feedback
-  - GET  /api/approvals/pending     - Get pending approvals
+  - GET  /                          - API overview
 
-Note: Make sure the Approval API is running on port 8085
-======================================================================
+✨ This is a unified server - no need to run approval_api.py separately!
+================================================================================
 ```
 
-**FastAPI Server Features:**
-- ✅ Production-ready deployment
-- ✅ Cloud logging and tracing
-- ✅ Custom endpoints for feedback and approval management
-- ✅ Health check endpoint
-- ✅ Session service configuration (Redis, Firestore)
-- ✅ Same API routes as ADK web server
+#### Access the Application
 
-**Important:** When using the FastAPI server, update your `.env` file:
-```bash
-ADK_API_URL=http://127.0.0.1:8080  # Use port 8080 instead of 8084
-```
-
-#### 3. Access the Web Interface
-
-**For ADK Web Server** (port 8084):
+**Web Interface:**
 Open your browser and navigate to:
 ```
-http://localhost:8084
+http://localhost:8086/dev-ui/
 ```
 
-Select the `insurance_notification` agent from the list.
+**Interactive API Documentation:**
+```
+http://localhost:8086/docs
+```
 
-**For FastAPI Server** (port 8080):
-The FastAPI server provides REST API endpoints. You can:
-- Use the interactive API docs at `http://localhost:8080/docs`
-- Send requests to `/run` endpoint programmatically
-- Access the web UI at `http://localhost:8080/dev-ui/`
+**API Overview:**
+```
+http://localhost:8086/
+```
+
+### Alternative: ADK Web Server (Development Only)
+
+For quick development/testing, you can still use the ADK web server:
+
+```bash
+# From the project root directory (hitl-adk)
+adk web .
+```
+
+Runs on port **8084** by default. Access at `http://localhost:8084`
+
+**Note:** When using `adk web`, you'll need to update your `.env`:
+```bash
+ADK_API_URL=http://127.0.0.1:8084  # Use port 8084 for adk web
+```
+
+**⚠️ Important:** The ADK web server does NOT include approval endpoints. For full HITL functionality, use the FastAPI server on port 8086.
 
 ### Example Interactions
 

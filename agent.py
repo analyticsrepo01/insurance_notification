@@ -326,7 +326,7 @@ def request_claim_approval(
 
     ticket_id = approval_request.ticket_id
 
-    # Get approval API server URL (separate from ADK web server)
+    # Get approval API server URL (same as agent server in unified deployment)
     approval_api_url = os.getenv("APPROVAL_API_URL")
 
     if not approval_api_url:
@@ -336,11 +336,11 @@ def request_claim_approval(
                 ["curl", "-s", "ifconfig.me"],
                 timeout=5
             ).decode('utf-8').strip()
-            approval_port = os.getenv("APPROVAL_API_PORT", "8085")
+            approval_port = os.getenv("AGENT_SERVER_PORT", "8086")
             approval_api_url = f"http://{external_ip}:{approval_port}"
         except Exception:
             # Fallback to localhost if external IP detection fails
-            approval_api_url = "http://localhost:8085"
+            approval_api_url = "http://localhost:8086"
 
     # Generate approve/reject URLs
     approve_url = f"{approval_api_url}/api/approve/{ticket_id}"

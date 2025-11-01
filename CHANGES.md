@@ -66,9 +66,12 @@ bash insurance_notification/start_agent_server.sh  # Port 8080
 
 ### New Way (1 terminal):
 ```bash
-# Just one command!
+# From hitl-adk/ directory (same as adk web .)
+cd /path/to/hitl-adk
 bash insurance_notification/start_agent_server.sh  # Port 8086
 ```
+
+**Note:** Just like `adk web .`, you run this from the `hitl-adk/` directory, NOT from inside `insurance_notification/`.
 
 ## What the FastAPI Server Now Includes
 

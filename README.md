@@ -114,14 +114,19 @@ The FastAPI server includes:
 
 #### Start the All-in-One FastAPI Server
 
+**Important:** Run these commands from the `hitl-adk/` directory (the parent directory), NOT from `hitl-adk/insurance_notification/`.
+
 ```bash
-# From the project root directory (hitl-adk)
+# Make sure you're in hitl-adk/ directory
+cd /path/to/hitl-adk
+
+# Then run the startup script
 bash insurance_notification/start_agent_server.sh
 ```
 
 Or run directly:
 ```bash
-# From the project root directory (hitl-adk)
+# From hitl-adk/ directory
 python -m insurance_notification.server
 ```
 
